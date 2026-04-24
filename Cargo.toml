@@ -1,0 +1,15 @@
+[package]
+name = "compho"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rawloader = "0.37" # RAW -> Bayer u16 + metadata (WB coeffs, CFA pattern, etc.)
+ndarray = { version = "0.16", features = ["rayon"] }
+ndrustfft = "0.4" # ndarray-native FFT/IFFT, wraps rustfft 
+rustfft = "6" # underlying FFT if I we need direct control
+num-complex = "0.4"
+rayon = "1.10"
+image = "0.25"
+indicatif = "0.17"
+clap = { version = "4", features = ["derive"] }

@@ -1,0 +1,74 @@
+mod burst;
+
+use std::path::PathBuf;
+use burst::BurstFrame;
+use clap::Parser;
+
+#[derive(Parser)]
+#[command(about = "HDR+ burst pipeline in Rust")]
+struct Args {
+    /// Directory containing the RAW burst files (sorted alphabetically = capture order)
+    #[arg(short, long)]
+    input_dir: PathBuf,
+
+    /// Output file path for merged result
+    #[arg(short, long, default_value = "output.png")]
+    output: PathBuf,
+}
+
+fn main() {
+    let args = Args::parse();
+
+    // Collect all RAW files in the directory, sorted by name
+    let mut raw_paths: Vec<PathBuf> = std::fs::read_dir(&args.input_dir)
+        .expect("Could not read input directory")
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            // rawloader supports DNG, CR2, NEF, ARW, etc.
+            let ext = path.extension()?.to_str()?.to_lowercase();
+            if matches!(ext.as_str(), "dng" | "cr2" | "nef" | "arw" | "rw2") {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    raw_paths.sort(); // For most burst naming schemes, alphabetical order = capture order
+
+    if raw_paths.len() < 2 {
+        eprintln!("Need at least 2 RAW files for a burst. Found {}", raw_paths.len());
+        std::process::exit(1);
+    }
+
+    println!("Loading {} frames...", raw_paths.len());
+
+    // Load all frames (frame 0 is the reference)
+    let frames: Vec<BurstFrame> = raw_paths
+        .iter()
+        .enumerate()
+        .map(|(i, path)| {
+            let path_str = path.to_str()
+                .unwrap_or_else(|| panic!("Non-UTF8 path: {}", path.display()));
+            let raw = rawloader::decode_file(path_str)
+                .unwrap_or_else(|e| panic!("Failed to decode {}: {}", path.display(), e));
+            BurstFrame::from_raw_image(&raw, i)
+                .unwrap_or_else(|e| panic!("Failed to build BurstFrame for {}: {}", path.display(), e))
+    })
+    .collect();
+
+    // Sanity check: all frames should have the same dimensions
+    let (ref_h, ref_w) = (frames[0].height, frames[0].width);
+    for f in &frames[1..] {
+        assert_eq!(
+            (f.height, f.width), (ref_h, ref_w),
+            "Frame {} has different dimmensions than the reference!", f.frame_index
+        );
+    }
+
+    println!(
+        "Reference frame: {}x{}, ISO {:?}, {:?}s exposure",
+        ref_w, ref_h, frames[0].iso, frames[0].exposure_time
+    );
+}
+
