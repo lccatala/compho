@@ -1,4 +1,5 @@
 mod burst;
+mod align;
 
 use std::path::PathBuf;
 use burst::BurstFrame;
@@ -70,5 +71,14 @@ fn main() {
         "Reference frame: {}x{}, ISO {:?}, {:?}s exposure",
         ref_w, ref_h, frames[0].iso, frames[0].exposure_time
     );
+
+    println!("Aligning {} alternate frames...", frames.len() - 1);
+    let alignments = align::align_burst(&frames);
+    for (i, result) in alignments.iter().enumerate() {
+        let center_tr = result.n_tile_rows / 2;
+        let center_tc = result.n_tile_cols / 2;
+        let (dr, dc) = result.offset_at(center_tr, center_tc);
+        println!("  Frame {}: center tile offset = ({}, {})", i + 1, dr, dc);
+    }
 }
 
