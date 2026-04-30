@@ -1,5 +1,6 @@
 mod burst;
 mod align;
+mod merge;
 
 use std::path::PathBuf;
 use burst::BurstFrame;
@@ -80,5 +81,25 @@ fn main() {
         let (dr, dc) = result.offset_at(center_tr, center_tc);
         println!("  Frame {}: center tile offset = ({}, {})", i + 1, dr, dc);
     }
+
+    println!("Merging...");
+    let t0 = std::time::Instant::now();
+    let merged = merge::merge_burst(&frames, &alignments);
+    println!("Merge done ({:1}s)", t0.elapsed().as_secs_f32());
+
+    // Save the merged Bayer as a grayscale PNG for now
+    save_bayer_plane_png_raw(&merged, "merged_bayer2.png");
 }
 
+fn save_bayer_plane_png_raw(bayer: &ndarray::Array2<f32>, path: &str) {
+    let (h, w) = bayer.dim();
+    let pixels: Vec<u8> = bayer.iter()
+        .map(|&v| {
+            // Apply sRGB gamma (for debug display only)
+            let gamma_corrected = v.clamp(0.0, 1.0).powf(1.0 / 2.2);
+            (gamma_corrected * 255.0) as u8
+        })
+        .collect();
+    image::save_buffer(path, &pixels, w as u32, h as u32, image::ColorType::L8)
+        .expect("Failed to save PNG");
+}
