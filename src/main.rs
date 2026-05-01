@@ -1,10 +1,13 @@
 mod burst;
 mod align;
 mod merge;
+mod demosaic;
 
 use std::path::PathBuf;
 use burst::BurstFrame;
 use clap::Parser;
+
+use crate::demosaic::demosaic;
 
 #[derive(Parser)]
 #[command(about = "HDR+ burst pipeline in Rust")]
@@ -88,7 +91,11 @@ fn main() {
     println!("Merge done ({:1}s)", t0.elapsed().as_secs_f32());
 
     // Save the merged Bayer as a grayscale PNG for now
-    save_bayer_plane_png_raw(&merged, "merged_bayer2.png");
+    save_bayer_plane_png_raw(&merged, "merged_bayer.png");
+
+    println!("Demosaicing...");
+    let rgb = demosaic(&merged, frames[0].cfa_pattern);
+    save_rgb_png(&rgb, "demosaiced.png");
 }
 
 fn save_bayer_plane_png_raw(bayer: &ndarray::Array2<f32>, path: &str) {
@@ -101,5 +108,20 @@ fn save_bayer_plane_png_raw(bayer: &ndarray::Array2<f32>, path: &str) {
         })
         .collect();
     image::save_buffer(path, &pixels, w as u32, h as u32, image::ColorType::L8)
+        .expect("Failed to save PNG");
+}
+
+fn save_rgb_png(rgb: &ndarray::Array3<f32>, path: &str) {
+    let (h, w, _) = rgb.dim();
+    let pixels: Vec<u8> = (0..h).flat_map(|r| {
+        (0..w).flat_map(move |c| {
+            (0..3).map(move |ch| {
+                let linear = rgb[[r, c, ch]].clamp(0.0, 1.0);
+                let gamma = linear.powf(1.0 / 2.2);
+                (gamma * 255.0) as u8
+            })
+        })
+    }).collect();
+    image::save_buffer(path, &pixels, w as u32, h as u32, image::ColorType::Rgb8)
         .expect("Failed to save PNG");
 }
