@@ -2,6 +2,8 @@ mod burst;
 mod align;
 mod merge;
 mod demosaic;
+mod color_correction;
+mod metadata;
 
 use std::path::PathBuf;
 use burst::BurstFrame;
@@ -57,7 +59,7 @@ fn main() {
                 .unwrap_or_else(|| panic!("Non-UTF8 path: {}", path.display()));
             let raw = rawloader::decode_file(path_str)
                 .unwrap_or_else(|e| panic!("Failed to decode {}: {}", path.display(), e));
-            BurstFrame::from_raw_image(&raw, i)
+            BurstFrame::from_raw_image(&raw, path_str, i)
                 .unwrap_or_else(|e| panic!("Failed to build BurstFrame for {}: {}", path.display(), e))
     })
     .collect();
@@ -89,13 +91,26 @@ fn main() {
     let t0 = std::time::Instant::now();
     let merged = merge::merge_burst(&frames, &alignments);
     println!("Merge done ({:1}s)", t0.elapsed().as_secs_f32());
+    println!("merged mean:   {:.6}", merged.mean().unwrap_or(0.0));
 
     // Save the merged Bayer as a grayscale PNG for now
     save_bayer_plane_png_raw(&merged, "merged_bayer.png");
 
     println!("Demosaicing...");
     let rgb = demosaic(&merged, frames[0].cfa_pattern);
-    save_rgb_png(&rgb, "demosaiced.png");
+    println!("rgb mean:      {:.6}", rgb.mean().unwrap_or(0.0));
+
+    println!("wb_coeffs:     {:?}", frames[0].wb_coeffs);
+    println!("color_matrix:  {:?}", frames[0].color_matrix);
+
+    let finished = color_correction::finish(
+        &rgb, 
+        &frames[0].wb_coeffs, 
+        &frames[0].color_matrix
+    );
+    println!("finished mean: {:.6}", finished.mean().unwrap_or(0.0));
+
+    save_rgb_png(&finished, "output.png");
 }
 
 fn save_bayer_plane_png_raw(bayer: &ndarray::Array2<f32>, path: &str) {
@@ -116,9 +131,7 @@ fn save_rgb_png(rgb: &ndarray::Array3<f32>, path: &str) {
     let pixels: Vec<u8> = (0..h).flat_map(|r| {
         (0..w).flat_map(move |c| {
             (0..3).map(move |ch| {
-                let linear = rgb[[r, c, ch]].clamp(0.0, 1.0);
-                let gamma = linear.powf(1.0 / 2.2);
-                (gamma * 255.0) as u8
+                (rgb[[r, c, ch]].clamp(0.0, 1.0) * 255.0) as u8
             })
         })
     }).collect();
