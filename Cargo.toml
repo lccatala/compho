@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 rawloader = "0.37" # RAW -> Bayer u16 + metadata (WB coeffs, CFA pattern, etc.)
+kamadak-exif = "0.5"
 ndarray = { version = "0.16", features = ["rayon"] }
 ndrustfft = "0.4" # ndarray-native FFT/IFFT, wraps rustfft 
 rustfft = "6" # underlying FFT if I we need direct control

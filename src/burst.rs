@@ -1,5 +1,6 @@
 use rawloader;
 use ndarray::Array2;
+use crate::metadata::read_dng_metadata;
 
 #[derive(Debug, Clone)]
 pub struct BurstFrame {
@@ -22,19 +23,39 @@ pub struct BurstFrame {
     // Burst metadata
     pub frame_index: usize, // Position in the burst (0 = reference)
     pub exposure_time: Option<f32>, // In seconds, from EXIF
-    pub iso: Option<f32>, // ISO sensitivity, from EXIF
+    pub iso: Option<u32>, // ISO sensitivity, from EXIF
 }
 
 impl BurstFrame {
     /// Construct from a rawloader::RawImage
     /// 'frame_index' is 0 for the reference frame, 1..N for alternates
-    pub fn from_raw_image(raw: &rawloader::RawImage, frame_index: usize) -> Result<Self, String> {
+    pub fn from_raw_image(raw: &rawloader::RawImage, path: &str, frame_index: usize) -> Result<Self, String> {
         let u16_data = match &raw.data {
             rawloader::RawImageData::Integer(v) => v,
             rawloader::RawImageData::Float(_) => {
                 return Err("Float raw data not supported".into());
             }
         };
+
+        let dng = read_dng_metadata(path);
+
+        let wb_coeffs = dng.wb_coeffs.unwrap_or_else(|| {
+            // Rawloader fallback
+            let raw_wb = raw.wb_coeffs;
+            if raw_wb.iter().any(|x| x.is_nan() || *x <= 0.0) {
+                [2.0, 1.0, 1.0, 1.5] // Neutral daylight estimate
+            } else {
+                raw_wb
+            }
+        });
+
+        let color_matrix = dng.color_matrix.unwrap_or_else(|| {
+            let xyz = raw.xyz_to_cam;
+            [xyz[0], xyz[1], xyz[2]]
+        });
+
+        let exposure_time = dng.exposure_time;
+        let iso = dng.iso;
 
         // black_level and white_level: rawloader gives per-channel arrays
         // but for a first pass we take the R-channel value for both
@@ -64,23 +85,7 @@ impl BurstFrame {
             other => return Err(format!("Unsupported CFA pattern {}", other)),
         };
 
-        let xyz_to_cam = raw.xyz_to_cam; // [[f32; 3]; 4]
-        let color_matrix = [
-            xyz_to_cam[0], // [f32; 3]
-            xyz_to_cam[1],
-            xyz_to_cam[2],
-            // xyz_to_cam[3] is dropped, it's a padding/normalisation row
-        ];
-
         let noise_model = NoiseModel::default_estimate();
-
-        // EXIF values
-        // rawloader intentionally omits EXIF metadata (exposure, ISO, etc.).
-        // For the alignment and merge stages these fields are unused, so None is fine.
-
-        let exposure_time = None;
-        let iso = None;
-
 
         Ok(BurstFrame {
             bayer,
@@ -89,7 +94,7 @@ impl BurstFrame {
             cfa_pattern,
             white_level: white,
             black_level: black,
-            wb_coeffs: raw.wb_coeffs,
+            wb_coeffs: wb_coeffs,
             color_matrix,
             noise_model,
             frame_index,
